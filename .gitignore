@@ -5,6 +5,7 @@ demo_tmp
 davis_results*
 tmp/
 tmp*/
+tmp/*
 wandb
 *.pth
 !*error_log.txt
@@ -18,7 +19,8 @@ avg_error
 .vscode
 .gradio
 pyrightconfig.json
-results
+results/*
+results2/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

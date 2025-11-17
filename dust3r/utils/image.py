@@ -26,6 +26,8 @@ except ImportError:
     heif_support_enabled = False
 
 ImgNorm = tvf.Compose([tvf.ToTensor(), tvf.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+EventNorm = tvf.Compose([tvf.ToTensor(), tvf.Normalize((0.0,), (1.0,))])
+# EventNorm = tvf.Compose([tvf.ToTensor()])
 ToTensor = tvf.ToTensor()
 TAG_FLOAT = 202021.25
 
@@ -120,6 +122,15 @@ def _resize_pil_image(img, long_edge_size, nearest=False):
     new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
     return img.resize(new_size, interp)
 
+def _resize_pil_image_event(img, events, long_edge_size, nearest=False):
+    S = max(img.size)
+    if S > long_edge_size:
+        interp = PIL.Image.LANCZOS if not nearest else PIL.Image.NEAREST
+    elif S <= long_edge_size:
+        interp = PIL.Image.BICUBIC
+    new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
+    events = cv2.resize(events, new_size, interpolation=cv2.INTER_NEAREST)
+    return img.resize(new_size, interp), events
 
 def crop_img(img, size, square_ok=False, nearest=False, crop=True):
     W1, H1 = img.size
@@ -143,6 +154,32 @@ def crop_img(img, size, square_ok=False, nearest=False, crop=True):
         else: # resize
             img = img.resize((2*halfw, 2*halfh), PIL.Image.LANCZOS)
     return img
+
+def crop_ev_img(img, events, size, square_ok=False, nearest=False, crop=True):
+    W1, H1 = img.size
+    if size == 224:
+        # resize short side to 224 (then crop)
+        img,events = _resize_pil_image_event(img, events, round(size * max(W1/H1, H1/W1)), nearest=nearest)
+    else:
+        # resize long side to 512
+        img,events = _resize_pil_image_event(img, events, size, nearest=nearest)
+    W, H = img.size
+    cx, cy = W//2, H//2
+    if size == 224:
+        half = min(cx, cy)
+        img = img.crop((cx-half, cy-half, cx+half, cy+half))
+        events = events[cy-half:cy+half, cx-half:cx+half]
+    else:
+        halfw, halfh = ((2*cx)//16)*8, ((2*cy)//16)*8
+        if not (square_ok) and W == H:
+            halfh = 3*halfw/4
+        if crop:
+            img = img.crop((cx-halfw, cy-halfh, cx+halfw, cy+halfh))
+            events = events[cy-halfh:cy+halfh, cx-halfw:cx+halfw]
+        else: # resize
+            img = img.resize((2*halfw, 2*halfh), PIL.Image.LANCZOS)
+            events = cv2.resize(events, (2*halfw, 2*halfh), interpolation=cv2.INTER_NEAREST)
+    return img, events
 
 def load_images(folder_or_list, size, square_ok=False, verbose=True, dynamic_mask_root=None, crop=True, fps=0, num_frames=110, imgs=None):
     """Open and convert all images or videos in a list or folder to proper input format for DUSt3R."""
@@ -274,6 +311,252 @@ def load_images(folder_or_list, size, square_ok=False, verbose=True, dynamic_mas
     assert imgs, 'No images found at ' + root
     if verbose:
         print(f' (Found {len(imgs)} images)')
+    return imgs
+
+
+def load_ev_images(folder_or_list, size, square_ok=False, verbose=True, dynamic_mask_root=None, crop=True, fps=0, num_frames=110, imgs=None):
+    """Open and convert all images or videos in a list or folder to proper input format for DUSt3R."""
+    # print(folder_or_list)
+    if imgs is None:
+        imgs = []
+    # if isinstance(folder_or_list, str):
+    #     if verbose:
+    #         print(f'>> Loading images from {folder_or_list}')
+    #     # if folder_or_list is a folder, load all images in the folder
+    #     if os.path.isdir(folder_or_list):
+    #         root, folder_content = folder_or_list, sorted(os.listdir(folder_or_list))
+    #     else: # the folder_content will be the folder_or_list itself
+    #         root, folder_content = '', [folder_or_list]
+
+    # elif isinstance(folder_or_list, list):
+    #     if verbose:
+    #         print(f'>> Loading a list of {len(folder_or_list)} items')
+    #     root, folder_content = '', folder_or_list
+
+    # else:
+    #     raise ValueError(f'Bad input {folder_or_list=} ({type(folder_or_list)})')
+
+    event_folder = folder_or_list + '/events'
+    img_folder = folder_or_list + '/rgbs'
+
+    supported_images_extensions = ['.jpg', '.jpeg', '.png']
+    supported_video_extensions = ['.mp4', '.avi', '.mov']
+    if heif_support_enabled:
+        supported_images_extensions += ['.heic', '.heif']
+    supported_images_extensions = tuple(supported_images_extensions)
+    supported_video_extensions = tuple(supported_video_extensions)
+
+    # Sort items by their names
+    # img_folder_content = sorted(img_folder, key=lambda x: x.split('/')[-1])
+    # event_folder_content = sorted(event_folder, key=lambda x: x.split('/')[-1])
+    img_folder_content = sorted(os.listdir(img_folder), key=lambda x: x.split('/')[-1])
+    event_folder_content = sorted(os.listdir(event_folder), key=lambda x: x.split('/')[-1])
+    # get the min of two folder lengths and truncate the longer one
+    min_len = min(len(img_folder_content), len(event_folder_content))
+    img_folder_content = img_folder_content[:min_len]
+    event_folder_content = event_folder_content[:min_len]
+
+
+    if num_frames is not None:
+        img_folder_content = img_folder_content[:num_frames]
+        event_folder_content = event_folder_content[:num_frames]
+    for img_path, event_path in zip(img_folder_content,event_folder_content):
+        full_img_path = os.path.join(img_folder, img_path)
+        full_event_path = os.path.join(event_folder, event_path)
+        if full_img_path.lower().endswith(supported_images_extensions) and full_event_path.lower().endswith(supported_images_extensions):
+            # Process image files
+            img = exif_transpose(PIL.Image.open(full_img_path)).convert('RGB')
+            W1, H1 = img.size
+            events = cv2.imread(full_event_path, cv2.IMREAD_GRAYSCALE)
+            events = events.astype(np.float32) / 255.0
+            img,events = crop_ev_img(img, events, size, square_ok=square_ok, crop=crop)
+            W2, H2 = img.size
+
+            # event_img = cv2.imread(full_event_path, cv2.IMREAD_GRAYSCALE)
+            # event_img = event_img.astype(np.float32) / 255.0
+
+            if verbose:
+                print(f' - Adding {img_path} with resolution {W1}x{H1} --> {W2}x{H2}')
+            
+            single_dict = dict(
+                img=ImgNorm(img)[None],
+                event=EventNorm(events)[None],
+                true_shape=np.int32([img.size[::-1]]),
+                idx=len(imgs),
+                instance=full_img_path,
+                mask=~(ToTensor(img)[None].sum(1) <= 0.01)
+            )
+            
+            if dynamic_mask_root is not None:
+                dynamic_mask_path = os.path.join(dynamic_mask_root, os.path.basename(path))
+            else:  # Sintel dataset handling
+                dynamic_mask_path = full_img_path.replace('final', 'dynamic_label_perfect').replace('clean', 'dynamic_label_perfect')
+
+            if os.path.exists(dynamic_mask_path):
+                dynamic_mask = PIL.Image.open(dynamic_mask_path).convert('L')
+                dynamic_mask = crop_img(dynamic_mask, size, square_ok=square_ok)
+                dynamic_mask = ToTensor(dynamic_mask)[None].sum(1) > 0.99  # "1" means dynamic
+                if dynamic_mask.sum() < 0.8 * dynamic_mask.numel():  # Consider static if over 80% is dynamic
+                    single_dict['dynamic_mask'] = dynamic_mask
+                else:
+                    single_dict['dynamic_mask'] = torch.zeros_like(single_dict['mask'])
+            else:
+                single_dict['dynamic_mask'] = torch.zeros_like(single_dict['mask'])
+
+            imgs.append(single_dict)
+
+        elif path.lower().endswith(supported_video_extensions):
+            # Process video files
+            if verbose:
+                print(f'>> Loading video from {full_path}')
+            cap = cv2.VideoCapture(full_path)
+            if not cap.isOpened():
+                print(f'Error opening video file {full_path}')
+                continue
+
+            video_fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            if video_fps == 0:
+                print(f'Error: Video FPS is 0 for {full_path}')
+                cap.release()
+                continue
+            if fps > 0:
+                frame_interval = max(1, int(round(video_fps / fps)))
+            else:
+                frame_interval = 1
+            frame_indices = list(range(0, total_frames, frame_interval))
+            if num_frames is not None:
+                frame_indices = frame_indices[:num_frames]
+
+            if verbose:
+                print(f' - Video FPS: {video_fps}, Frame Interval: {frame_interval}, Total Frames to Read: {len(frame_indices)}')
+
+            for frame_idx in frame_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if not ret:
+                    break  # End of video
+
+                img = PIL.Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                W1, H1 = img.size
+                img = crop_img(img, size, square_ok=square_ok, crop=crop)
+                W2, H2 = img.size
+
+                if verbose:
+                    print(f' - Adding frame {frame_idx} from {path} with resolution {W1}x{H1} --> {W2}x{H2}')
+                
+                single_dict = dict(
+                    img=ImgNorm(img)[None],
+                    true_shape=np.int32([img.size[::-1]]),
+                    idx=len(imgs),
+                    instance=f'{full_path}_frame_{frame_idx}',
+                    mask=~(ToTensor(img)[None].sum(1) <= 0.01)
+                )
+
+                # Dynamic masks for video frames are set to zeros by default
+                single_dict['dynamic_mask'] = torch.zeros_like(single_dict['mask'])
+
+                imgs.append(single_dict)
+
+            cap.release()
+
+        else:
+            continue  # Skip unsupported file types
+
+    assert imgs, 'No images found at ' + root
+    if verbose:
+        print(f' (Found {len(imgs)} images)')
+    return imgs
+
+
+def load_events_for_eval(
+    folder_or_list, size, square_ok=False, verbose=True, crop=True, patch_size=16
+):
+    """open and convert all images in a list or folder to proper input format for DUSt3R"""
+    if isinstance(folder_or_list, str):
+        if verbose:
+            print(f">> Loading images from {folder_or_list}")
+        root, img_folder_content = folder_or_list, sorted(os.listdir(folder_or_list+"/rgb"))
+        root, event_folder_content = folder_or_list, sorted(os.listdir(folder_or_list+"/events"))
+        print(f"Found {len(img_folder_content)} images and {len(event_folder_content)} event frames.")
+        # get minimum length
+        min_length = min(len(img_folder_content), len(event_folder_content))
+        # truncate both lists to minimum length
+        folder_content = [(img_folder_content[i], event_folder_content[i]) for i in range(min_length)]
+
+
+    elif isinstance(folder_or_list, list):
+        if verbose:
+            print(f">> Loading a list of {len(folder_or_list)} images")
+        root, folder_content = "", folder_or_list
+
+    else:
+        raise ValueError(f"bad {folder_or_list=} ({type(folder_or_list)})")
+
+    supported_images_extensions = [".jpg", ".jpeg", ".png"]
+    if heif_support_enabled:
+        supported_images_extensions += [".heic", ".heif"]
+    supported_images_extensions = tuple(supported_images_extensions)
+
+    imgs = []
+    for i, path in enumerate(folder_content):
+        if not (path[0].lower().endswith(supported_images_extensions) and path[1].lower().endswith(supported_images_extensions)):
+            continue
+        img = exif_transpose(PIL.Image.open(os.path.join(root, path[1]))).convert("RGB")
+        event_img = cv2.imread(os.path.join(root, path[0]), cv2.IMREAD_GRAYSCALE)
+        event_img = event_img.astype(np.float32) / 255.0
+
+        W1, H1 = img.size
+        if size == 224:
+            # resize short side to 224 (then crop)
+            img = _resize_pil_image(img, round(size * max(W1 / H1, H1 / W1)))
+            event_img = PIL.Image.fromarray(event_img)
+            event_img = _resize_pil_image(event_img, round(size * max(W1 / H1, H1 / W1)))
+        else:
+            # resize long side to 512
+            img = _resize_pil_image(img, size)
+            event_img = PIL.Image.fromarray(event_img)
+            event_img = _resize_pil_image(event_img, size)
+
+        W, H = img.size
+        cx, cy = W // 2, H // 2
+        if size == 224:
+            half = min(cx, cy)
+            if crop:
+                img = img.crop((cx - half, cy - half, cx + half, cy + half))
+                event_img = event_img.crop((cx - half, cy - half, cx + half, cy + half))
+            else:  # resize
+                img = img.resize((2 * half, 2 * half), PIL.Image.LANCZOS)
+                event_img = event_img.resize((2 * half, 2 * half), PIL.Image.LANCZOS)
+        else:
+            halfw, halfh = ((2 * cx) // patch_size) * (patch_size//2), ((2 * cy) // patch_size) * (patch_size//2)
+            if not (square_ok) and W == H:
+                halfh = 3 * halfw / 4
+            if crop:
+                img = img.crop((cx - halfw, cy - halfh, cx + halfw, cy + halfh))
+                event_img = event_img.crop((cx - halfw, cy - halfh, cx + halfw, cy + halfh))
+            else:  # resize
+                img = img.resize((2 * halfw, 2 * halfh), PIL.Image.LANCZOS)
+                event_img = event_img.resize((2 * halfw, 2 * halfh), PIL.Image.LANCZOS)
+        W2, H2 = img.size
+
+        if verbose:
+            print(f" - adding {path} with resolution {W1}x{H1} --> {W2}x{H2}")
+
+        imgs.append(
+            dict(
+                img=ImgNorm(img)[None],
+                event=EventNorm(event_img)[None],
+                true_shape=np.int32([img.size[::-1]]),
+                idx=len(imgs),
+                instance=str(len(imgs)),
+            )
+        )
+
+    assert imgs, "no images foud at " + root
+    if verbose:
+        print(f" (Found {len(imgs)} images)")
     return imgs
 
 def load_prev_video_results(prev_output_dir, num_frames, index=None):

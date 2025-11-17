@@ -12,6 +12,7 @@ from .staticthings3d import StaticThings3D  # noqa
 from .waymo import Waymo  # noqa
 from .wildrgbd import WildRGBD  # noqa
 from .pointodyssey import PointOdysseyDUSt3R  # noqa
+from .pointodyssey import EventPointOdysseyDUSt3R  # noqa
 from .sintel import SintelDUSt3R  # noqa
 from .tartanair import TarTanAirDUSt3R  # noqa
 from .spring_dataset import SpringDUSt3R  # noqa

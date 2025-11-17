@@ -16,11 +16,14 @@ from pathlib import Path
 from typing import Sized
 
 import torch
+import torch.nn.functional as F
+
+import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >= 1.12
 
-from dust3r.model import AsymmetricCroCo3DStereo, inf  # noqa: F401, needed when loading the model
+from dust3r.model import AsymmetricCroCo3DStereo, AsymmetricCroCo3DEventStereo, AsymmetricCroCo3DEventRGBStereo, AsymmetricCroCo3DEventRGBStereoV2, VGGTEventRGBStereo, VGGTEventRGBStereoV2, inf  # noqa: F401, needed when loading the model
 from dust3r.datasets import get_data_loader  # noqa
 from dust3r.losses import *  # noqa: F401, needed when loading the model
 from dust3r.inference import loss_of_one_batch, visualize_results  # noqa
@@ -117,7 +120,7 @@ def get_args_parser():
     parser.add_argument('--seq_list', nargs='+', default=None, help='list of sequences for pose evaluation')
 
     parser.add_argument('--eval_dataset', type=str, default='sintel', 
-                    choices=['davis', 'kitti', 'bonn', 'scannet', 'tum', 'nyu', 'sintel'], 
+                    choices=['davis', 'kitti', 'bonn', 'scannet', 'tum', 'nyu', 'sintel','pointodyssey'], 
                     help='choose dataset for pose evaluation')
 
     # for monocular depth eval
@@ -126,6 +129,25 @@ def get_args_parser():
     # output dir
     parser.add_argument('--output_dir', default='./results/tmp', type=str, help="path where to save the output")
     return parser
+
+def resize_pos_embed(posemb, posemb_new):
+    """
+    Rescale the grid of position embeddings when fine-tuning
+    a model to a different image size or patch size.
+    """
+    ntok_new = posemb_new.shape[1]
+
+    # Separate the [CLS] token if present
+    if ntok_new != posemb.shape[1]:
+        posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
+        gs_old = int(posemb_grid.shape[0] ** 0.5)
+        gs_new = int((ntok_new - 1) ** 0.5)
+
+        posemb_grid = posemb_grid.reshape(1, gs_old, gs_old, -1).permute(0, 3, 1, 2)
+        posemb_grid = F.interpolate(posemb_grid, size=(gs_new, gs_new), mode='bicubic', align_corners=False)
+        posemb_grid = posemb_grid.permute(0, 2, 3, 1).reshape(1, gs_new * gs_new, -1)
+        posemb = torch.cat([posemb_tok, posemb_grid], dim=1)
+    return posemb
 
 def load_model(args, device):
     # model
@@ -136,7 +158,24 @@ def load_model(args, device):
     if args.pretrained and not args.resume:
         print('Loading pretrained: ', args.pretrained)
         ckpt = torch.load(args.pretrained, map_location=device)
+        # print(ckpt.keys())
         print(model.load_state_dict(ckpt['model'], strict=False))
+
+        ## Added for rebalancing weights --------------
+        # state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+        # model_state = model.state_dict()
+
+        # for k in list(state_dict.keys()):
+        #     if k == "aggregator.patch_embed.pos_embed":
+        #         # Resize positional embeddings to match model shape
+        #         state_dict[k] = resize_pos_embed(state_dict[k], model_state[k])
+        #         print(f"Resized {k} from {state_dict[k].shape} → {model_state[k].shape}")
+        #     elif k in model_state and state_dict[k].shape != model_state[k].shape:
+        #         print(f"Skipping {k}: checkpoint {state_dict[k].shape}, model {model_state[k].shape}")
+        #         del state_dict[k]
+        # print(model.load_state_dict(state_dict, strict=False))
+        ## Added for rebalancing weights --------------
+        # print(model.load_state_dict(ckpt, strict=False))
         del ckpt  # in case it occupies memory
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(

@@ -2,8 +2,8 @@
 # training executable for DUSt3R
 # --------------------------------------------------------
 from dust3r.training import get_args_parser, train, load_model
-from dust3r.pose_eval import eval_pose_estimation
-from dust3r.depth_eval import eval_mono_depth_estimation
+from dust3r.ev_pose_eval import eval_pose_estimation
+from dust3r.ev_depth_eval import eval_mono_depth_estimation
 import croco.utils.misc as misc  # noqa
 import torch
 import torch.backends.cudnn as cudnn

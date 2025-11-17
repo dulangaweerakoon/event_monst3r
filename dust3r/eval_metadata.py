@@ -83,8 +83,37 @@ dataset_metadata = {
         'skip_condition': None,
         'process_func': lambda args, img_path: process_sintel(args, img_path),
     },
+    "pointodyssey": {
+        "img_path": "/storage/dulanga/4DRecon/event_monst3r/data/point_odyssey/test",
+        'anno_path': "/storage/dulanga/4DRecon/event_monst3r/data/point_odyssey/test",
+        'dir_path_func': lambda img_path, seq: os.path.join(img_path, seq),
+        'gt_traj_func': lambda img_path, anno_path, seq: os.path.join(anno_path, seq),
+        'traj_format': 'replica',
+        "mask_path": None,
+        "process_func": lambda args, img_path: process_pointodyssey(args, img_path),
+        'seq_list': ["ani2","ani12_new_f"],
+        'full_seq': False,
+    },
 }
 
+def process_pointodyssey(args, img_path):
+    for dir in tqdm(sorted(glob.glob(f"{img_path}/*"))):
+        # check if in seq_list
+        seq_name = os.path.basename(dir)
+        if seq_name not in dataset_metadata['pointodyssey']['seq_list']:
+            continue
+        event_filelist = sorted(glob.glob(f"{dir}/events/*.png"))
+        rgb_filelist = sorted(glob.glob(f"{dir}/rgbs/*.jpg"))
+        # get minimum length
+        min_length = min(len(rgb_filelist), len(event_filelist))
+        # truncate both lists to minimum length
+        rgb_filelist = rgb_filelist[:min_length]
+        event_filelist = event_filelist[:min_length]
+        filelist = list(zip(rgb_filelist, event_filelist))
+        # folderlist = sorted(glob.glob(f"{dir}/*"))
+        save_dir = f"{args.output_dir}/{os.path.basename(dir)}"
+        yield filelist, save_dir
+        
 # Define processing functions for each dataset
 def process_kitti(args, img_path):
     for dir in tqdm(sorted(glob.glob(f'{img_path}/*'))):

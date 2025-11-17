@@ -5,7 +5,10 @@
 # DUST3R default transforms
 # --------------------------------------------------------
 import torchvision.transforms as tvf
-from dust3r.utils.image import ImgNorm
+from dust3r.utils.image import ImgNorm, EventNorm
 
 # define the standard image transforms
 ColorJitter = tvf.Compose([tvf.ColorJitter(0.5, 0.5, 0.5, 0.1), ImgNorm])
+
+# define the standard event transforms
+EventTransform = tvf.Compose([EventNorm])
