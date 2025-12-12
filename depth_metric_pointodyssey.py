@@ -9,17 +9,34 @@ import glob
 from PIL import Image
 
 
+# def depth_read(filename):
+#     # loads depth map D from png file
+#     # and returns it as a numpy array
+#     depth_png = np.asarray(Image.open(filename))
+#     # make sure we have a proper 16bit depth map here.. not 8bit!
+#     # print(np.min(depth_png),np.max(depth_png))
+#     assert np.max(depth_png) > 255
+#     depth = depth_png.astype(np.float64) / 5000.0
+#     depth[depth_png == 0] = -1.0
+#     return depth
+
 def depth_read(filename):
     # loads depth map D from png file
     # and returns it as a numpy array
     depth_png = np.asarray(Image.open(filename))
     # make sure we have a proper 16bit depth map here.. not 8bit!
-    assert np.max(depth_png) > 255
+    # print(np.min(depth_png),np.max(depth_png))
+    # assert np.max(depth_png) > 255
     depth = depth_png.astype(np.float64) / 5000.0
     depth[depth_png == 0] = -1.0
     return depth
 
-seq_list = ["ani2","ani12_new_f"]
+# seq_list = ["ani2","ani12_new_f"]
+# seq_list = ["seminar_g110_0315_ego1"] # High
+# seq_list = ["dancingroom1_3rd"] # Low
+# seq_list = ["dancingroom1_3rd2"] # Medium
+# seq_list = ["ani2"] # High obj motion
+seq_list = ["seminar_g110_0315_3rd"] # Low obj motion
 
 img_pathes_folder = [f"/storage/dulanga/4DRecon/event_monst3r/data/point_odyssey/test/{seq}/rgbs/*.jpg" for seq in seq_list]
 img_pathes = []
@@ -48,7 +65,7 @@ def get_video_results():
                               for pd_path in pd_pathes], axis=0)
         
         min_len = min(pr_depth.shape[0], gt_depth.shape[0])
-        # min_len = 10
+        min_len = 64
         pr_depth = pr_depth[:min_len]
         gt_depth = gt_depth[:min_len]
         

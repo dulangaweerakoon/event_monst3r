@@ -91,18 +91,26 @@ dataset_metadata = {
         'traj_format': 'replica',
         "mask_path": None,
         "process_func": lambda args, img_path: process_pointodyssey(args, img_path),
-        'seq_list': ["ani2","ani12_new_f"],
+        # 'seq_list': ["ani2","ani12_new_f"],
+        # 'seq_list': ["seminar_g110_0315_ego1"], #High
+        # 'seq_list': ["dancingroom1_3rd"], #Low
+        # 'seq_list': ["dancingroom1_3rd2"], #Medium
+        # 'seq_list': ["ani2"], # High obj motion
+        'seq_list': ["seminar_g110_0315_3rd"], # Low obj motion
         'full_seq': False,
     },
 }
 
-def process_pointodyssey(args, img_path):
+def process_pointodyssey(args, img_path, voxels=True):
     for dir in tqdm(sorted(glob.glob(f"{img_path}/*"))):
         # check if in seq_list
         seq_name = os.path.basename(dir)
         if seq_name not in dataset_metadata['pointodyssey']['seq_list']:
             continue
-        event_filelist = sorted(glob.glob(f"{dir}/events/*.png"))
+        if voxels:
+            event_filelist = sorted(glob.glob(f"{dir}/event_voxels/*.npy"))
+        else:
+            event_filelist = sorted(glob.glob(f"{dir}/events/*.png"))
         rgb_filelist = sorted(glob.glob(f"{dir}/rgbs/*.jpg"))
         # get minimum length
         min_length = min(len(rgb_filelist), len(event_filelist))

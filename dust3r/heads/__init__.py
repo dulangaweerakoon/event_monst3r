@@ -8,12 +8,15 @@ from .linear_head import LinearPts3d
 from .dpt_head import create_dpt_head
 
 
-def head_factory(head_type, output_mode, net, has_conf=False):
+def head_factory(head_type, output_mode, net, has_conf=False, object_aware=False):
     """" build a prediction head for the decoder 
     """
     if head_type == 'linear' and output_mode == 'pts3d':
         return LinearPts3d(net, has_conf)
-    elif head_type == 'dpt' and output_mode == 'pts3d':
+    elif head_type == 'dpt' and output_mode == 'pts3d' and not object_aware:
         return create_dpt_head(net, has_conf=has_conf)
+    elif head_type == 'dpt' and output_mode == 'pts3d' and object_aware:
+        return create_dpt_head(net, has_conf=has_conf, object_aware=True)
+    
     else:
         raise NotImplementedError(f"unexpected {head_type=} and {output_mode=}")

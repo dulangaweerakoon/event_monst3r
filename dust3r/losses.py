@@ -238,6 +238,91 @@ class ConfLoss (MultiLoss):
         return conf_loss1 + conf_loss2, dict(conf_loss_1=float(conf_loss1), conf_loss2=float(conf_loss2), **details)
 
 
+class MaskedConfLoss (MultiLoss):
+    """ Weighted regression by learned confidence.
+        Assuming the input pixel_loss is a pixel-level regression loss.
+
+    Principle:
+        high-confidence means high conf = 0.1 ==> conf_loss = x / 10 + alpha*log(10)
+        low  confidence means low  conf = 10  ==> conf_loss = x * 10 - alpha*log(10) 
+
+        alpha: hyperparameter
+    """
+
+    def __init__(self, pixel_loss, alpha=1):
+        super().__init__()
+        assert alpha > 0
+        self.alpha = alpha
+        self.pixel_loss = pixel_loss.with_reduction('none')
+
+    def get_name(self):
+        return f'ConfLoss({self.pixel_loss})'
+
+    def get_conf_log(self, x):
+        return x, torch.log(x)
+
+    def compute_loss(self, gt1, gt2, pred1, pred2, pred1_masked, pred2_masked, **kw):
+        # compute per-pixel loss
+        ((loss1, msk1), (loss2, msk2)), details = self.pixel_loss(gt1, gt2, pred1, pred2, **kw)
+
+        # print(gt2['valid_mask'].shape, pred2_masked['attention_masks'].shape)
+
+        # masked object loss computation
+        gt1_masked = {'pts3d': gt1['pts3d'], 'valid_mask': gt1['valid_mask'], 'camera_pose': gt1['camera_pose']}
+        gt2_masked = {'pts3d': gt2['pts3d'], 'valid_mask': gt2['valid_mask'], 'camera_pose': gt2['camera_pose']}
+
+        # print("Camera: ",gt1_masked['camera_pose'].shape, pred1_masked['pts3d'].shape, pred1_masked['attention_masks'].shape)
+
+        # repeat pts3d by num_masks
+        num_masks1 = pred1_masked['attention_masks'].shape[0] // gt1['pts3d'].shape[0]
+        num_masks2 = pred2_masked['attention_masks'].shape[0] // gt2['pts3d'].shape[0]
+        # print("Num masks: ", num_masks1, num_masks2)
+        gt1_masked['pts3d'] = gt1['pts3d'].unsqueeze(1).repeat(1, num_masks1, 1, 1, 1)
+        gt1_masked['pts3d'] = gt1_masked['pts3d'].reshape(gt1_masked['pts3d'].shape[0]*gt1_masked['pts3d'].shape[1], gt1_masked['pts3d'].shape[2], gt1_masked['pts3d'].shape[3], gt1_masked['pts3d'].shape[4])  # B*num_masks x H x W x 3
+        gt1_masked['valid_mask'] = pred1_masked['attention_masks']
+        gt1_masked['camera_pose'] = gt1['camera_pose'].unsqueeze(1).repeat(1, num_masks1, 1, 1)
+        gt1_masked['camera_pose'] = gt1_masked['camera_pose'].reshape(gt1_masked['camera_pose'].shape[0]*gt1_masked['camera_pose'].shape[1], gt1_masked['camera_pose'].shape[2], gt1_masked['camera_pose'].shape[3])  # B*num_masks x 4 x 4
+
+
+        gt2_masked['pts3d'] = gt2['pts3d'].unsqueeze(1).repeat(1, num_masks2, 1, 1, 1)
+        gt2_masked['pts3d'] = gt2_masked['pts3d'].reshape(gt2_masked['pts3d'].shape[0]*gt2_masked['pts3d'].shape[1], gt2_masked['pts3d'].shape[2], gt2_masked['pts3d'].shape[3], gt2_masked['pts3d'].shape[4])  # B*num_masks x H x W x 3
+        gt2_masked['valid_mask'] = pred2_masked['attention_masks']
+        gt2_masked['camera_pose'] = gt2['camera_pose'].unsqueeze(1).repeat(1, num_masks2, 1, 1)
+        gt2_masked['camera_pose'] = gt2_masked['camera_pose'].reshape(gt2_masked['camera_pose'].shape[0]*gt2_masked['camera_pose'].shape[1], gt2_masked['camera_pose'].shape[2], gt2_masked['camera_pose'].shape[3])  # B*num_masks x 4 x 4
+        
+        # print("Before: ", gt1_masked['pts3d'].shape, pred1_masked['pts3d'].shape, pred1_masked['attention_masks'].shape, gt1_masked['valid_mask'].shape)
+        # reshape attention mask from B*num_masks x H x W  to B x num_masks x H x W
+
+        # print("pred: ",pred1_masked['pts3d'].shape, pred1_masked['attention_masks'].shape, gt1['valid_mask'].shape)
+
+        # gt1_masked['valid_mask'] = gt1_masked['valid_mask'].unsqueeze(1).repeat(1, num_masks1, 1, 1)
+        # gt2_masked['valid_mask'] = gt2_masked['valid_mask'].unsqueeze(1).repeat(1, num_masks2, 1, 1)
+        ((loss1_masked, msk1_masked), (loss2_masked, msk2_masked)), details_masked = self.pixel_loss(gt1_masked, gt2_masked, pred1_masked, pred2_masked, **kw)
+        # print("Masked Loss: ", loss1_masked)
+        # print("After: ",pred1['pts3d'].shape, pred1_masked['pts3d'].shape, pred1_masked['attention_masks'].shape)
+        if loss1.numel() == 0:
+            print('NO VALID POINTS in img1', force=True)
+        if loss2.numel() == 0:
+            print('NO VALID POINTS in img2', force=True)
+
+        # print(pred1_masked.keys())
+
+        # weight by confidence
+        conf1, log_conf1 = self.get_conf_log(pred1['conf'][msk1])
+        conf2, log_conf2 = self.get_conf_log(pred2['conf'][msk2])
+        conf_loss1 = loss1 * conf1 - self.alpha * log_conf1
+        conf_loss2 = loss2 * conf2 - self.alpha * log_conf2
+
+        # average + nan protection (in case of no valid pixels at all)
+        conf_loss1 = conf_loss1.mean() if conf_loss1.numel() > 0 else 0
+        conf_loss2 = conf_loss2.mean() if conf_loss2.numel() > 0 else 0
+
+        # print("Masked Losses: ", loss1_masked.mean(), loss2_masked.mean())
+        # print("Conf Losses: ", conf_loss1, conf_loss2)
+
+        return conf_loss1 + conf_loss2 + 5*loss1_masked.mean()+5*loss2_masked.mean(), dict(conf_loss_1=float(conf_loss1), conf_loss2=float(conf_loss2), **details)
+
+
 class Regr3D_ShiftInv (Regr3D):
     """ Same than Regr3D but invariant to depth shift.
     """

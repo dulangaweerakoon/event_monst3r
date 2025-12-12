@@ -7,7 +7,8 @@ from tqdm import tqdm
 from dust3r.image_pairs import make_pairs
 from dust3r.inference import inference
 from dust3r.utils.image import rgb, enlarge_seg_masks
-from dust3r.utils.image import load_events_for_eval as load_images
+# from dust3r.utils.image import load_events_for_eval as load_images
+from dust3r.utils.image import load_event_voxels_for_eval as load_images
 from copy import deepcopy
 from scipy.optimize import minimize
 import os
@@ -71,8 +72,9 @@ def eval_mono_depth(args, model, device, filelist, save_dir=None):
             # also save the png
             depth_map = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min())
             depth_map = (depth_map * 255).cpu().numpy().astype(np.uint8)
+            # print(f"{save_dir}/{file[0][1].split('/')[-1].replace('.png','depth.png')}")
             # depth_map = colorize_depth(depth_map)
-            cv2.imwrite(f"{save_dir}/{file[0][1].split('/')[-1].replace('.png','depth.png')}", depth_map)
+            cv2.imwrite(f"{save_dir}/{file[0][1].split('/')[-1].replace('.npy','depth.png')}", depth_map)
 
 
 

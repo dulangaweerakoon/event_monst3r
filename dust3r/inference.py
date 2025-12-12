@@ -68,11 +68,19 @@ def loss_of_one_batch(batch, model, criterion, device, symmetrize_batch=False, u
         view1, view2 = make_batch_symmetric(batch)
 
     with torch.cuda.amp.autocast(enabled=bool(use_amp)):
-        pred1, pred2 = model(view1, view2)
+        # check if model type is ObjectAwareDepthV1
+        if type(model).__name__ == 'ObjectAwareDepthV2' and model.training:
+            pred1, pred2, pred1_masked, pred2_masked = model(view1, view2)
+            
+            # loss is supposed to be symmetric
+            with torch.cuda.amp.autocast(enabled=False):
+                loss = criterion(view1, view2, pred1, pred2, pred1_masked, pred2_masked) if criterion is not None else None
+        else:
+            pred1, pred2 = model(view1, view2)
             
         # loss is supposed to be symmetric
-        with torch.cuda.amp.autocast(enabled=False):
-            loss = criterion(view1, view2, pred1, pred2) if criterion is not None else None
+            with torch.cuda.amp.autocast(enabled=False):
+                loss = criterion(view1, view2, pred1, pred2) if criterion is not None else None
 
     result = dict(view1=view1, view2=view2, pred1=pred1, pred2=pred2, loss=loss)
         

@@ -5,3 +5,9 @@
 [submodule "viser"]
 	path = viser
 	url = https://github.com/junyi42/viser
+[submodule "sam3"]
+	path = sam3
+	url = https://github.com/facebookresearch/sam3.git
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/huggingface/transformers.git

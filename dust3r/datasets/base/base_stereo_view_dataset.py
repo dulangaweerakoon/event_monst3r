@@ -314,7 +314,8 @@ class BaseEventStereoViewDataset (EasyDataset):
             width, height = view['img'].size
             view['true_shape'] = np.int32((height, width))
             view['img'] = self.transform(view['img'])
-            view['event'] = self.ev_transform(view['event'])
+            # Enable if the event transform is needed
+            # view['event'] = self.ev_transform(view['event'])
 
             assert 'camera_intrinsics' in view
             if 'camera_pose' not in view:
@@ -369,8 +370,8 @@ class BaseEventStereoViewDataset (EasyDataset):
         if not isinstance(image, PIL.Image.Image):
             image = PIL.Image.fromarray(image)
         
-        if not isinstance(event, PIL.Image.Image):
-            event = PIL.Image.fromarray(event)
+        # if not isinstance(event, PIL.Image.Image):
+        #     event = PIL.Image.fromarray(event)
 
         # downscale with lanczos interpolation so that image.size == resolution
         # cropping centered on the principal point

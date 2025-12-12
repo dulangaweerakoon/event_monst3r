@@ -15,7 +15,7 @@ import copy
 from dust3r.inference import inference
 from dust3r.model import AsymmetricCroCo3DStereo, AsymmetricCroCo3DEventStereo
 from dust3r.image_pairs import make_pairs
-from dust3r.utils.image import load_images, load_prev_video_results, rgb, enlarge_seg_masks, load_ev_images
+from dust3r.utils.image import load_images, load_prev_video_results, rgb, enlarge_seg_masks, load_ev_voxels
 from dust3r.utils.device import to_numpy
 from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.utils.viz_demo import convert_scene_output_to_glb, get_dynamic_mask_from_pairviewer

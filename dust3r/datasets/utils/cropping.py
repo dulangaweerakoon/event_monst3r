@@ -58,7 +58,7 @@ def rescale_image_depthmap(image, depthmap, camera_intrinsics, output_resolution
         so that (out_width, out_height) >= output_res
     """
     image = ImageList(image)
-    event = ImageList(event) if event is not None else None
+    # event = ImageList(event) if event is not None else None
     input_resolution = np.array(image.size)  # (W,H)
     output_resolution = np.array(output_resolution)
     if depthmap is not None:
@@ -75,7 +75,10 @@ def rescale_image_depthmap(image, depthmap, camera_intrinsics, output_resolution
     # first rescale the image so that it contains the crop
     image = image.resize(tuple(output_resolution), resample=lanczos if scale_final < 1 else bicubic)
     if event is not None:
-        event = event.resize(tuple(output_resolution), resample=lanczos if scale_final < 1 else bicubic)
+        # event = event.resize(tuple(output_resolution), resample=lanczos if scale_final < 1 else bicubic)
+        # resize event using nearest neighbor
+        event = cv2.resize(event.transpose(1,2,0), tuple(output_resolution), fx=scale_final,
+                           fy=scale_final, interpolation=cv2.INTER_NEAREST).transpose(2,0,1)
     if depthmap is not None:
         depthmap = cv2.resize(depthmap, output_resolution, fx=scale_final,
                               fy=scale_final, interpolation=cv2.INTER_NEAREST)
@@ -85,7 +88,7 @@ def rescale_image_depthmap(image, depthmap, camera_intrinsics, output_resolution
         camera_intrinsics, input_resolution, output_resolution, scaling=scale_final)
 
     if event is not None:
-        return image.to_pil(), depthmap, camera_intrinsics, event.to_pil()
+        return image.to_pil(), depthmap, camera_intrinsics, event#.to_pil()
     else:
         return image.to_pil(), depthmap, camera_intrinsics
 
@@ -110,8 +113,8 @@ def center_crop_image_depthmap(image, depthmap, camera_intrinsics, crop_scale, e
     # Convert image to ImageList for consistent processing
     image = ImageList(image)
     input_resolution = np.array(image.size)  # (width, height)
-    if event is not None:
-        event = ImageList(event)
+    # if event is not None:
+    #     event = ImageList(event)
     if depthmap is not None:
         # Ensure depthmap matches the image size
         assert depthmap.shape[:2] == tuple(image.size[::-1]), "Depthmap size must match image size"
@@ -137,7 +140,8 @@ def center_crop_image_depthmap(image, depthmap, camera_intrinsics, crop_scale, e
         depthmap = depthmap[t:b, l:r]
     
     if event is not None:
-        event = event.crop(crop_bbox)
+        # event = event.crop(crop_bbox)
+        event = event[:,t:b, l:r]
 
     # Adjust the camera intrinsics
     adjusted_intrinsics = camera_intrinsics.copy()
@@ -151,7 +155,7 @@ def center_crop_image_depthmap(image, depthmap, camera_intrinsics, crop_scale, e
     adjusted_intrinsics[1, 2] -= t  # cy
 
     if event is not None:
-        return image.to_pil(), depthmap, adjusted_intrinsics, event.to_pil()
+        return image.to_pil(), depthmap, adjusted_intrinsics, event#.to_pil()
     else:  
         return image.to_pil(), depthmap, adjusted_intrinsics
 
@@ -184,15 +188,16 @@ def crop_image_depthmap(image, depthmap, camera_intrinsics, crop_bbox, event=Non
     depthmap = depthmap[t:b, l:r]
 
     if event is not None:
-        event = ImageList(event)
-        event = event.crop((l, t, r, b))
+        # event = ImageList(event)
+        # event = event.crop((l, t, r, b))
+        event = event[:,t:b, l:r]
 
     camera_intrinsics = camera_intrinsics.copy()
     camera_intrinsics[0, 2] -= l
     camera_intrinsics[1, 2] -= t
 
     if event is not None:
-        return image.to_pil(), depthmap, camera_intrinsics, event.to_pil()
+        return image.to_pil(), depthmap, camera_intrinsics, event#.to_pil()
     else:
         return image.to_pil(), depthmap, camera_intrinsics
 

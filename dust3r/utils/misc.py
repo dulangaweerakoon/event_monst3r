@@ -118,6 +118,71 @@ def transpose_to_landscape(head, activate=True):
     return wrapper_yes if activate else wrapper_no
 
 
+def transpose_to_landscape_ob_aware(head, activate=True):
+    """ Predict in the correct aspect-ratio,
+        then transpose the result in landscape 
+        and stack everything back together.
+    """
+    def wrapper_no(decout, true_shape, attention_masks=None, max_instance_ids=None):
+        B = len(true_shape)
+        assert true_shape[0:1].allclose(true_shape), 'true_shape must be all identical'
+        H, W = true_shape[0].cpu().tolist()
+        res, res_masked, res_attention_masks = head(decout, (H, W), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+        return res, res_masked, res_attention_masks
+
+    def wrapper_yes(decout, true_shape, attention_masks=None, max_instance_ids=None):
+        B = len(true_shape)
+        # by definition, the batch is in landscape mode so W >= H
+        H, W = int(true_shape.min()), int(true_shape.max())
+
+        height, width = true_shape.T
+        is_landscape = (width >= height)
+        is_portrait = ~is_landscape
+
+        # true_shape = true_shape.cpu()
+        if is_landscape.all():
+            res, res_masked, res_attention_masks = head(decout, (H, W), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+            # return head(decout, (H, W), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+            return res, res_masked, res_attention_masks
+        if is_portrait.all():
+            res, res_masked, res_attention_masks = head(decout, (W, H), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+            res = transposed(res)
+            res_masked = transposed(res_masked)
+            return res, res_masked, res_attention_masks
+            # return transposed(head(decout, (W, H)), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+
+        # batch is a mix of both portraint & landscape
+        def selout(ar): return [d[ar] for d in decout]
+        # l_result = head(selout(is_landscape), (H, W), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+        l_result, l_result_masked, l_attention_masks = head(selout(is_landscape), (H, W), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+        # p_result = transposed(head(selout(is_portrait), (W, H),
+        # p_result = transposed(head(selout(is_portrait), (W, H), attention_masks=attention_masks, max_instance_ids=max_instance_ids))
+        p_result, p_result_masked, p_attention_masks = head(selout(is_portrait), (W, H), attention_masks=attention_masks, max_instance_ids=max_instance_ids)
+        p_result = transposed(p_result)
+        p_result_masked = transposed(p_result_masked)
+
+        print(p_result_masked)
+
+        # allocate full result
+        result = {}
+        for k in l_result | p_result:
+            x = l_result[k].new(B, *l_result[k].shape[1:])
+            x[is_landscape] = l_result[k]
+            x[is_portrait] = p_result[k]
+            result[k] = x
+        
+        result_masked = {}
+        for k in l_result_masked | p_result_masked:
+            x = l_result_masked[k].new(B, *l_result_masked[k].shape[1:])
+            x[is_landscape] = l_result_masked[k]
+            x[is_portrait] = p_result_masked[k]
+            result_masked[k] = x
+
+        return result, result_masked, attention_masks
+
+    return wrapper_yes if activate else wrapper_no
+
+
 def transposed(dic):
     return {k: v.swapaxes(1, 2) for k, v in dic.items()}
 

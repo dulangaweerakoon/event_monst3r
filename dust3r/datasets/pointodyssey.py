@@ -455,7 +455,11 @@ class EventVoxelPointOdysseyDUSt3R(BaseEventStereoViewDataset):
                 if os.path.isdir(os.path.join(seq, 'event_voxels')):
                     # check if there are any files in the event_voxels folder
                     if len(os.listdir(os.path.join(seq, 'event_voxels'))) > 1:
-                        self.sequences.append(seq)
+                        # now count the number of files in the rgbs folder
+                        num_rgb_files = len(os.listdir(os.path.join(seq, 'rgbs')))
+                        num_event_voxel_files = len(os.listdir(os.path.join(seq, 'event_voxels')))
+                        if abs(num_rgb_files - num_event_voxel_files)<=5:
+                            self.sequences.append(seq)
 
         self.sequences = sorted(self.sequences)
         if self.verbose:
@@ -599,10 +603,15 @@ class EventVoxelPointOdysseyDUSt3R(BaseEventStereoViewDataset):
                     event_img  = np.load(eventpath)
                     # concatenate to rgb image
                     # rgb_image = np.concatenate([rgb_image, event_img], axis=2)
-            print("Event voxel shape:", event_img.shape)
+            
 
             rgb_image, depthmap, intrinsics,event_img = self._crop_resize_if_necessary(
                 rgb_image, depthmap, event_img, intrinsics, resolution, rng=rng, info=impath)
+            
+            # print("Event voxel shape:", event_img.shape, rgb_image.size, depthmap.shape)
+            # # temporarily save the event voxel as a png for visualization
+            # event_voxel_vis = (event_img[0] / np.max(event_img) * 255).astype(np.uint8)
+            # cv2.imwrite(f'tmp/event_voxel_{idx}.png', event_voxel_vis)
 
             views.append(dict(
                 img=rgb_image,
