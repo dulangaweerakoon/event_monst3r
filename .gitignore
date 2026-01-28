@@ -22,6 +22,7 @@ avg_error
 pyrightconfig.json
 results/*
 results2/*
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

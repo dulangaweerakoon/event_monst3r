@@ -112,6 +112,25 @@ def rgb(ftensor, true_shape=None):
         img = (ftensor * 0.5) + 0.5
     return img.clip(min=0, max=1)
 
+def toevent(ftensor, true_shape=None):
+    if isinstance(ftensor, list):
+        return [toevent(x, true_shape=true_shape) for x in ftensor]
+    if isinstance(ftensor, torch.Tensor):
+        ftensor = ftensor.detach().cpu().numpy()  # H,W,3
+    if ftensor.ndim == 3 and ftensor.shape[0] == 5:
+        ftensor = ftensor.transpose(1, 2, 0)
+    elif ftensor.ndim == 4 and ftensor.shape[1] == 5:
+        ftensor = ftensor.transpose(0, 2, 3, 1)
+    if true_shape is not None:
+        H, W = true_shape
+        ftensor = ftensor[:H, :W]
+    # if ftensor.dtype == np.uint8:
+    #     img = np.float32(ftensor) / 255
+    # else:
+    #     img = (ftensor * 0.5) + 0.5
+    # return img.clip(min=0, max=1)
+    return np.float32(ftensor)
+
 
 def _resize_pil_image(img, long_edge_size, nearest=False):
     S = max(img.size)
@@ -130,6 +149,16 @@ def _resize_pil_image_event(img, events, long_edge_size, nearest=False):
         interp = PIL.Image.BICUBIC
     new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
     events = cv2.resize(events, new_size, interpolation=cv2.INTER_NEAREST)
+    return img.resize(new_size, interp), events
+
+def _resize_pil_image_event_voxels(img, events, long_edge_size, nearest=False):
+    S = max(img.size)
+    if S > long_edge_size:
+        interp = PIL.Image.LANCZOS if not nearest else PIL.Image.NEAREST
+    elif S <= long_edge_size:
+        interp = PIL.Image.BICUBIC
+    new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
+    events = cv2.resize(events.transpose(1,2,0), new_size, interpolation=cv2.INTER_NEAREST).transpose(2,0,1)
     return img.resize(new_size, interp), events
 
 def crop_img(img, size, square_ok=False, nearest=False, crop=True):
@@ -179,6 +208,32 @@ def crop_ev_img(img, events, size, square_ok=False, nearest=False, crop=True):
         else: # resize
             img = img.resize((2*halfw, 2*halfh), PIL.Image.LANCZOS)
             events = cv2.resize(events, (2*halfw, 2*halfh), interpolation=cv2.INTER_NEAREST)
+    return img, events
+
+def crop_ev_voxels_img(img, events, size, square_ok=False, nearest=False, crop=True):
+    W1, H1 = img.size
+    if size == 224:
+        # resize short side to 224 (then crop)
+        img,events = _resize_pil_image_event_voxels(img, events, round(size * max(W1/H1, H1/W1)), nearest=nearest)
+    else:
+        # resize long side to 512
+        img,events = _resize_pil_image_event_voxels(img, events, size, nearest=nearest)
+    W, H = img.size
+    cx, cy = W//2, H//2
+    if size == 224:
+        half = min(cx, cy)
+        img = img.crop((cx-half, cy-half, cx+half, cy+half))
+        events = events[:,cy-half:cy+half, cx-half:cx+half]
+    else:
+        halfw, halfh = ((2*cx)//16)*8, ((2*cy)//16)*8
+        if not (square_ok) and W == H:
+            halfh = 3*halfw/4
+        if crop:
+            img = img.crop((cx-halfw, cy-halfh, cx+halfw, cy+halfh))
+            events = events[:,cy-halfh:cy+halfh, cx-halfw:cx+halfw]
+        else: # resize
+            img = img.resize((2*halfw, 2*halfh), PIL.Image.LANCZOS)
+            events = cv2.resize(events.transpose(1,2,0), (2*halfw, 2*halfh), interpolation=cv2.INTER_NEAREST).transpose(2,0,1)
     return img, events
 
 def load_images(folder_or_list, size, square_ok=False, verbose=True, dynamic_mask_root=None, crop=True, fps=0, num_frames=110, imgs=None):
@@ -491,7 +546,7 @@ def load_ev_voxels(folder_or_list, size, square_ok=False, verbose=True, dynamic_
     # else:
     #     raise ValueError(f'Bad input {folder_or_list=} ({type(folder_or_list)})')
 
-    event_folder = folder_or_list + '/voxels'
+    event_folder = folder_or_list + '/event_voxels'
     img_folder = folder_or_list + '/rgbs'
 
     supported_images_extensions = ['.jpg', '.jpeg', '.png']
@@ -524,8 +579,10 @@ def load_ev_voxels(folder_or_list, size, square_ok=False, verbose=True, dynamic_
             W1, H1 = img.size
             events = np.load(full_event_path)
             # events = events.astype(np.float32) / 255.0
-            img,events = crop_ev_img(img, events, size, square_ok=square_ok, crop=crop)
+            img,events = crop_ev_voxels_img(img, events, size, square_ok=square_ok, crop=crop)
             W2, H2 = img.size
+
+            print("Events: ",events.shape, "image size:", img.size)
 
             # event_img = cv2.imread(full_event_path, cv2.IMREAD_GRAYSCALE)
             # event_img = event_img.astype(np.float32) / 255.0
@@ -535,7 +592,8 @@ def load_ev_voxels(folder_or_list, size, square_ok=False, verbose=True, dynamic_
             
             single_dict = dict(
                 img=ImgNorm(img)[None],
-                event=EventNorm(events)[None],
+                # event=EventNorm(events)[None],
+                event = torch.from_numpy(events).float()[None],
                 true_shape=np.int32([img.size[::-1]]),
                 idx=len(imgs),
                 instance=full_img_path,

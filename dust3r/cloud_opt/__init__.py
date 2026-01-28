@@ -8,6 +8,7 @@ from enum import Enum
 
 from .optimizer import PointCloudOptimizer
 from .modular_optimizer import ModularPointCloudOptimizer
+from .optimizer import EventGuidedPointCloudOptimizer
 from .pair_viewer import PairViewer
 
 
@@ -15,6 +16,7 @@ class GlobalAlignerMode(Enum):
     PointCloudOptimizer = "PointCloudOptimizer"
     ModularPointCloudOptimizer = "ModularPointCloudOptimizer"
     PairViewer = "PairViewer"
+    EventGuidedPointCloudOptimizer = "EventGuidedPointCloudOptimizer"
 
 
 def global_aligner(dust3r_output, device, mode=GlobalAlignerMode.PointCloudOptimizer, **optim_kw):
@@ -27,6 +29,8 @@ def global_aligner(dust3r_output, device, mode=GlobalAlignerMode.PointCloudOptim
         net = ModularPointCloudOptimizer(view1, view2, pred1, pred2, **optim_kw).to(device)
     elif mode == GlobalAlignerMode.PairViewer:
         net = PairViewer(view1, view2, pred1, pred2, **optim_kw).to(device)
+    elif mode == GlobalAlignerMode.EventGuidedPointCloudOptimizer:
+        net = EventGuidedPointCloudOptimizer(view1, view2, pred1, pred2, **optim_kw).to(device)
     else:
         raise NotImplementedError(f'Unknown mode {mode}')
 
